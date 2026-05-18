@@ -9,10 +9,6 @@
 - 增量更新：仅同步有变化的书籍
 - 生成阅读时间热力图（类似 GitHub 贡献图）
 
-## 热力图
-
-![WeRead Heatmap](OUT_FOLDER/heatmap.svg)
-
 ## 使用方法
 
 ### 1. 安装依赖

@@ -1,0 +1,26 @@
+name: Sync WeRead
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # UTC 0:00 = 北京时间 8:00
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Sync books and notes
+        env:
+          WEREAD_API_KEY: ${{ secrets.WEREAD_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        run: python -m weread2notion
