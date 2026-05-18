@@ -14,6 +14,8 @@ class NotionHelper:
             auth=NOTION_TOKEN,
             retry=RetryOptions(max_retries=3),
         )
+        # Use older Notion-Version for compatibility with databases/query endpoint
+        self.client.client.headers["notion-version"] = "2022-06-28"
         self.database_id = NOTION_DATABASE_ID
 
     def get_all_books(self):
@@ -21,10 +23,14 @@ class NotionHelper:
         results = []
         start_cursor = None
         while True:
-            kwargs = {"page_size": 100}
+            body = {"page_size": 100}
             if start_cursor:
-                kwargs["start_cursor"] = start_cursor
-            resp = self.client.data_sources.query(self.database_id, **kwargs)
+                body["start_cursor"] = start_cursor
+            resp = self.client.request(
+                path=f"databases/{self.database_id}/query",
+                method="POST",
+                body=body,
+            )
             results.extend(resp["results"])
             if not resp.get("has_more"):
                 break
@@ -41,7 +47,11 @@ class NotionHelper:
 
     def query_database(self, **kwargs):
         """Query database with filter."""
-        return self.client.data_sources.query(self.database_id, **kwargs)
+        return self.client.request(
+            path=f"databases/{self.database_id}/query",
+            method="POST",
+            body=kwargs,
+        )
 
     def create_book_page(self, properties, icon_url=None):
         kwargs = {
@@ -90,39 +100,49 @@ class NotionHelper:
         if content_type is None:
             content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
 
-        result = self.client.file_uploads.create(
-            mode="single_part",
-            filename=filename,
-            content_type=content_type,
-        )
-        file_id = result.get("id")
-        if not file_id:
-            return None
-
-        with open(file_path, "rb") as f:
-            resp = self.client.file_uploads.send(
-                file_id,
-                file=f,
+        try:
+            result = self.client.file_uploads.create(
+                mode="single_part",
                 filename=filename,
+                content_type=content_type,
             )
-        if resp.get("status") == "uploaded":
-            return file_id
+            file_id = result.get("id")
+            if not file_id:
+                return None
+
+            with open(file_path, "rb") as f:
+                resp = self.client.file_uploads.send(
+                    file_id,
+                    file=f,
+                    filename=filename,
+                )
+            if resp.get("status") == "uploaded":
+                return file_id
+        except Exception:
+            pass
+        return None
         return None
 
     def upload_file_from_url(self, url, filename="cover.jpg"):
         """Upload a file via external_url mode."""
-        result = self.client.file_uploads.create(
-            mode="external_url",
-            external_url=url,
-            filename=filename,
-        )
+        try:
+            result = self.client.file_uploads.create(
+                mode="external_url",
+                external_url=url,
+                filename=filename,
+            )
+        except Exception:
+            return None
         file_id = result.get("id")
         if not file_id:
             return None
 
         for _ in range(20):
             time.sleep(1)
-            check = self.client.file_uploads.retrieve(file_id)
+            try:
+                check = self.client.file_uploads.retrieve(file_id)
+            except Exception:
+                return None
             status = check.get("status")
             if status == "uploaded":
                 return file_id

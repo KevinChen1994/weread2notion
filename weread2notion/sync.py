@@ -1,4 +1,8 @@
+import os
 import time
+import tempfile
+
+import requests as http_requests
 
 from .weread_api import WeReadApi
 from .notion_helper import NotionHelper
@@ -49,7 +53,7 @@ def sync_books(force=False):
         book_data = _build_book_data(weread, book, archive_map, read_update_time)
 
         if book_data.get("cover"):
-            file_id = notion.upload_file_from_url(book_data["cover"])
+            file_id = _download_and_upload_cover(notion, book_data["cover"])
             if file_id:
                 book_data["cover_file_id"] = file_id
 
@@ -261,3 +265,53 @@ def _batch_append_blocks(notion, page_id, blocks):
         notion.append_blocks(page_id, batch)
         if i + BATCH_SIZE < len(blocks):
             time.sleep(0.3)
+
+
+def _download_and_upload_cover(notion, cover_url):
+    """Download cover image to local temp file, then upload to Notion."""
+    try:
+        resp = http_requests.get(cover_url, timeout=15)
+        if resp.status_code != 200:
+            return None
+    except Exception:
+        return None
+
+    content_type = resp.headers.get("Content-Type", "").split(";")[0].strip()
+    if content_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+        content_type = _guess_image_type(cover_url, resp.content)
+
+    ext = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }.get(content_type, ".jpg")
+
+    tmp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    try:
+        tmp_file.write(resp.content)
+        tmp_file.close()
+        file_id = notion.upload_file_local(tmp_file.name, filename=f"cover{ext}", content_type=content_type)
+        return file_id
+    finally:
+        os.unlink(tmp_file.name)
+
+
+def _guess_image_type(url, content):
+    """Guess image MIME type from URL extension or file magic bytes."""
+    url_lower = url.lower().split("?")[0]
+    if url_lower.endswith(".png"):
+        return "image/png"
+    if url_lower.endswith(".webp"):
+        return "image/webp"
+    if url_lower.endswith(".gif"):
+        return "image/gif"
+
+    if content[:8].startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    if content[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+
+    return "image/jpeg"

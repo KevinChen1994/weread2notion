@@ -83,3 +83,13 @@ python -m weread2notion --heatmap
 - `WEREAD_API_KEY`
 - `NOTION_TOKEN`
 - `NOTION_DATABASE_ID`
+
+## 已知问题
+
+### notion-client 3.x 兼容性
+
+notion-client 3.x SDK 默认使用 `Notion-Version: 2025-09-03` 并将 `databases.query` 迁移到了新的 `data_sources.query` 端点。但目前部分 Notion Integration 尚未支持该新端点，会报 `Could not find database` 错误。
+
+当前的 workaround：手动将 Notion-Version 降为 `2022-06-28`，通过 `client.request()` 调用旧的 `databases/{id}/query` 路径。等 Notion 官方完全迁移后可改回使用 `client.data_sources.query()`。
+
+相关代码：`weread2notion/notion_helper.py` 中的 `NotionHelper.__init__` 和 `get_all_books`。
