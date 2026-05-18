@@ -1,17 +1,19 @@
+import os
 import time
+import mimetypes
 
-import requests as http_requests
-from notion_client import Client
+from notion_client import Client, RetryOptions
 
 from .config import NOTION_TOKEN, NOTION_DATABASE_ID
 from .utils import MAX_LENGTH
 
-NOTION_VERSION = "2022-06-28"
-
 
 class NotionHelper:
     def __init__(self):
-        self.client = Client(auth=NOTION_TOKEN)
+        self.client = Client(
+            auth=NOTION_TOKEN,
+            retry=RetryOptions(max_retries=3),
+        )
         self.database_id = NOTION_DATABASE_ID
 
     def get_all_books(self):
@@ -19,10 +21,10 @@ class NotionHelper:
         results = []
         start_cursor = None
         while True:
-            kwargs = {"database_id": self.database_id, "page_size": 100}
+            kwargs = {"page_size": 100}
             if start_cursor:
                 kwargs["start_cursor"] = start_cursor
-            resp = self.client.databases.query(**kwargs)
+            resp = self.client.data_sources.query(self.database_id, **kwargs)
             results.extend(resp["results"])
             if not resp.get("has_more"):
                 break
@@ -37,6 +39,10 @@ class NotionHelper:
                 books[book_id] = {"pageId": page["id"], "sort": sort_val}
         return books
 
+    def query_database(self, **kwargs):
+        """Query database with filter."""
+        return self.client.data_sources.query(self.database_id, **kwargs)
+
     def create_book_page(self, properties, icon_url=None):
         kwargs = {
             "parent": {"database_id": self.database_id},
@@ -47,19 +53,19 @@ class NotionHelper:
         return self.client.pages.create(**kwargs)
 
     def update_book_page(self, page_id, properties, icon_url=None):
-        kwargs = {"page_id": page_id, "properties": properties}
+        kwargs = {"properties": properties}
         if icon_url:
             kwargs["icon"] = {"type": "external", "external": {"url": icon_url}}
-        return self.client.pages.update(**kwargs)
+        return self.client.pages.update(page_id, **kwargs)
 
     def get_children_blocks(self, page_id):
         blocks = []
         start_cursor = None
         while True:
-            kwargs = {"block_id": page_id, "page_size": 100}
+            kwargs = {"page_size": 100}
             if start_cursor:
                 kwargs["start_cursor"] = start_cursor
-            resp = self.client.blocks.children.list(**kwargs)
+            resp = self.client.blocks.children.list(page_id, **kwargs)
             blocks.extend(resp["results"])
             if not resp.get("has_more"):
                 break
@@ -69,101 +75,59 @@ class NotionHelper:
     def clear_page_blocks(self, page_id):
         blocks = self.get_children_blocks(page_id)
         for block in blocks:
-            self.client.blocks.delete(block_id=block["id"])
+            self.client.blocks.delete(block["id"])
 
     def append_blocks(self, page_id, blocks):
-        return self.client.blocks.children.append(block_id=page_id, children=blocks)
+        return self.client.blocks.children.append(page_id, children=blocks)
 
     def append_blocks_after(self, page_id, blocks, after):
-        return self.client.blocks.children.append(
-            block_id=page_id, children=blocks, after=after
-        )
+        return self.client.blocks.children.append(page_id, children=blocks, after=after)
 
     def upload_file_local(self, file_path, filename=None, content_type=None):
-        """Upload a local file to Notion via single_part mode, return file_upload id."""
-        import os
-        import mimetypes
-
+        """Upload a local file via SDK file_uploads endpoint."""
         if filename is None:
             filename = os.path.basename(file_path)
         if content_type is None:
             content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
 
-        headers = {
-            "Authorization": f"Bearer {NOTION_TOKEN}",
-            "Content-Type": "application/json",
-            "Notion-Version": NOTION_VERSION,
-        }
-        body = {
-            "mode": "single_part",
-            "filename": filename,
-            "content_type": content_type,
-        }
-        resp = http_requests.post(
-            "https://api.notion.com/v1/file_uploads",
-            headers=headers,
-            json=body,
+        result = self.client.file_uploads.create(
+            mode="single_part",
+            filename=filename,
+            content_type=content_type,
         )
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        file_id = data.get("id")
+        file_id = result.get("id")
         if not file_id:
             return None
 
-        send_headers = {
-            "Authorization": f"Bearer {NOTION_TOKEN}",
-            "Notion-Version": NOTION_VERSION,
-        }
         with open(file_path, "rb") as f:
-            resp = http_requests.post(
-                f"https://api.notion.com/v1/file_uploads/{file_id}/send",
-                headers=send_headers,
-                files={"file": (filename, f, content_type)},
+            resp = self.client.file_uploads.send(
+                file_id,
+                file=f,
+                filename=filename,
             )
-        if resp.status_code != 200:
-            return None
-        status = resp.json().get("status")
-        if status == "uploaded":
+        if resp.get("status") == "uploaded":
             return file_id
         return None
 
     def upload_file_from_url(self, url, filename="cover.jpg"):
-        """Upload a file to Notion via external_url mode, return file_upload id."""
-        headers = {
-            "Authorization": f"Bearer {NOTION_TOKEN}",
-            "Content-Type": "application/json",
-            "Notion-Version": NOTION_VERSION,
-        }
-        body = {
-            "mode": "external_url",
-            "external_url": url,
-            "filename": filename,
-        }
-        resp = http_requests.post(
-            "https://api.notion.com/v1/file_uploads",
-            headers=headers,
-            json=body,
+        """Upload a file via external_url mode."""
+        result = self.client.file_uploads.create(
+            mode="external_url",
+            external_url=url,
+            filename=filename,
         )
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        file_id = data.get("id")
+        file_id = result.get("id")
         if not file_id:
             return None
-        # Wait for import to complete
+
         for _ in range(20):
             time.sleep(1)
-            check = http_requests.get(
-                f"https://api.notion.com/v1/file_uploads/{file_id}",
-                headers={"Authorization": f"Bearer {NOTION_TOKEN}", "Notion-Version": NOTION_VERSION},
-            )
-            if check.status_code == 200:
-                status = check.json().get("status")
-                if status == "uploaded":
-                    return file_id
-                if status in ("failed", "expired"):
-                    return None
+            check = self.client.file_uploads.retrieve(file_id)
+            status = check.get("status")
+            if status == "uploaded":
+                return file_id
+            if status in ("failed", "expired"):
+                return None
         return None
 
     @staticmethod
