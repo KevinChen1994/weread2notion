@@ -15,18 +15,18 @@ def main():
         print("请执行: export WEREAD_API_KEY=wrk-xxxxxxxx")
         sys.exit(1)
 
-    if not NOTION_TOKEN:
-        print("错误: 未设置 NOTION_TOKEN 环境变量")
-        sys.exit(1)
-
-    if not NOTION_DATABASE_ID:
-        print("错误: 未设置 NOTION_DATABASE_ID 环境变量")
-        sys.exit(1)
-
     if args.heatmap:
         from .heatmap import sync_heatmap
         sync_heatmap()
     else:
+        if not NOTION_TOKEN:
+            print("错误: 未设置 NOTION_TOKEN 环境变量")
+            sys.exit(1)
+
+        if not NOTION_DATABASE_ID:
+            print("错误: 未设置 NOTION_DATABASE_ID 环境变量")
+            sys.exit(1)
+
         from .sync import sync_books
         sync_books(force=args.force)
 
