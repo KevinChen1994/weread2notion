@@ -2,6 +2,12 @@
 
 微信读书同步到 Notion，基于 WeRead Skill API（API Key 鉴权）。
 
+## 关于微信读书 Skills
+
+[微信读书 Skills](https://weread.qq.com/r/weread-skills) 是微信读书官方提供的开放能力平台，允许第三方通过 API Key 方式访问用户的阅读数据，包括书架、阅读进度、划线、笔记、阅读统计等。相比传统的 Cookie 鉴权方式，Skill API Key 更稳定、不会频繁过期，适合用于自动化同步场景。
+
+获取 API Key：访问 https://weread.qq.com/r/weread-skills ，创建 Skill 后即可获得 `wrk-` 开头的 API Key。
+
 ## 功能
 
 - 同步书架中所有书籍的元数据到 Notion 数据库（书名、作者、封面、进度、评分等）
